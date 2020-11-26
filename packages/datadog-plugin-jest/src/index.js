@@ -1,61 +1,19 @@
-const { exec } = require('child_process')
 const { promisify } = require('util')
 
-const promiseExec = promisify(exec)
+const getGitMetadata = require('../../dd-trace/src/plugins/util/git')
+const getCiMetadata = require('../../dd-trace/src/plugins/util/ci')
+const {
+  TEST_FRAMEWORK,
+  TEST_TYPE,
+  TEST_NAME,
+  TEST_SUITE,
+  TEST_STATUS
+} = require('../../dd-trace/src/plugins/util/test')
 
-const GIT_COMMIT_SHA = 'git.commit_sha'
-const GIT_BRANCH = 'git.branch'
-const GIT_REPOSITORY_URL = 'git.repository_url'
 const BUILD_SOURCE_ROOT = 'build.source_root'
-const TEST_FRAMEWORK = 'test.framework'
-const TEST_TYPE = 'test.type'
-const TEST_NAME = 'test.name'
-const TEST_SUITE = 'test.suite'
-const TEST_STATUS = 'test.status'
-const CI_PIPELINE_URL = 'ci.pipeline.url'
-const CI_PIPELINE_ID = 'ci.pipeline.id'
-const CI_PIPELINE_NUMBER = 'ci.pipeline.number'
-const CI_WORKSPACE_PATH = 'ci.workspace_path'
-const CI_PROVIDER_NAME = 'ci.provider.name'
 
 const SPAN_TYPE = 'span.type'
 const RESOURCE_NAME = 'resource.name'
-
-function getCIMetadata () {
-  const { env } = process
-  if (env.GITHUB_ACTIONS) {
-    const { GITHUB_REF, GITHUB_SHA, GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_NUMBER, GITHUB_WORKSPACE } = env
-
-    const pipelineURL = `https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
-
-    return {
-      [CI_PIPELINE_URL]: pipelineURL,
-      [CI_PIPELINE_ID]: GITHUB_RUN_ID,
-      [CI_PROVIDER_NAME]: 'github',
-      [CI_PIPELINE_NUMBER]: GITHUB_RUN_NUMBER,
-      [CI_WORKSPACE_PATH]: GITHUB_WORKSPACE,
-      [GIT_BRANCH]: GITHUB_REF,
-      [GIT_COMMIT_SHA]: GITHUB_SHA
-    }
-  }
-  return {}
-}
-
-const sanitizedRun = async cmd => {
-  try {
-    return (await promiseExec(cmd)).stdout.replace(/(\r\n|\n|\r)/gm, '')
-  } catch (e) {
-    return ''
-  }
-}
-
-async function getGitInformation () {
-  return {
-    repository: await sanitizedRun('git ls-remote --get-url'),
-    branch: await sanitizedRun('git branch --show-current'),
-    commit: await sanitizedRun('git rev-parse HEAD')
-  }
-}
 
 function finishStartedSpans () {
   global.tracer
@@ -79,8 +37,8 @@ function getEnvironment (BaseEnvironment) {
     }
     async setup () {
       if (!global.tracer) {
-        const ciMetadata = getCIMetadata()
-        const { repository, branch, commit } = await getGitInformation()
+        const ciMetadata = getCiMetadata()
+        const gitMetadata = await getGitMetadata()
         global.tracer = require('../../dd-trace').init({
           sampleRate: 1,
           flushInterval: 1,
@@ -90,9 +48,7 @@ function getEnvironment (BaseEnvironment) {
           },
           tags: {
             ...ciMetadata,
-            [GIT_COMMIT_SHA]: commit,
-            [GIT_BRANCH]: branch,
-            [GIT_REPOSITORY_URL]: repository,
+            ...gitMetadata,
             [BUILD_SOURCE_ROOT]: this.rootDir,
             [TEST_FRAMEWORK]: 'jest'
           }
